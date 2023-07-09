@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 from hashlib import md5
 from typing import Optional
 
@@ -37,6 +38,15 @@ class Article(Model):
         database = db
 
 
+@dataclass
+class TelegramMessage:
+    title: str
+    link: str
+    tags: list[str]
+    description: str
+    image: str
+
+
 def check():
     logger.info('Checking...')
 
@@ -69,23 +79,24 @@ def first_run(feed):
 
 
 def process_new_article(entry):
-    category = re.match(r'https://www\.ildolomiti\.it/(\w+)/', entry.link)
-    category = category.group(1) if category else None
-    if category == 'blog' or category == 'necrologi' or category == 'video':
+    tag = re.match(r'https://www\.ildolomiti\.it/(\w+)/', entry.link)
+    tag = tag.group(1) if tag else None
+    if tag == 'blog' or tag == 'necrologi' or tag == 'video':
         return
 
     details = fetch_article_details(entry.link)
 
-    message = {
-        'title': entry.title.strip(),
-        'link': entry.link,
-        'category': category,
-        'description': details['description'] or entry.description,
-        'image': details['image'] or 'fallback.jpg',
-    }
+    message = TelegramMessage(
+        title=entry.title.strip(),
+        link=entry.link,
+        tags=[tag] + details['tags'],
+        description=details['description'] or entry.description,
+        image=details['image'] or 'fallback.jpg',
+    )
 
     # Title is different, since we could match the post by post ID but couldn't by link/title
     if details['post_id'] and (article := Article.get_or_none(post_id=details['post_id'])):
+        article: Article
         logger.info(f'Updating article: {entry.link} (old: {article.link})')
         if not article.telegram_message_id:
             logger.error('Article has no telegram_message_id, skipping')
@@ -95,8 +106,8 @@ def process_new_article(entry):
             logger.exception('Error updating message')
             return  # so that it's retried later
         send_log(article, entry)
-        article.title = message['title']
-        article.link = message['link']
+        article.title = message.title
+        article.link = message.link
         article.save()
     # Otherwise assume that it's new
     else:
@@ -108,8 +119,8 @@ def process_new_article(entry):
             return  # so that it's retried later
         Article.create(
             post_id=details['post_id'],
-            title=message['title'],
-            link=message['link'],
+            title=message.title,
+            link=message.link,
             published=time.mktime(entry.published_parsed),
             telegram_message_id=message_id
         )
@@ -149,10 +160,13 @@ def fetch_article_details(link: str) -> dict:
     else:
         logger.error('Article node not found')
 
+    tags = ['belluno'] if 'section="BELLUNO"' in resp.text else []
+
     return {
         'post_id': post_id,
         'description': description,
         'image': image,
+        'tags': tags,
     }
 
 
@@ -171,17 +185,19 @@ def download_image(image_url: str) -> Optional[str]:
         return None
 
 
-def send_message(message, telegram_message_id=None) -> int:
+def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
     msg = ''
-    if message['category']:
-        msg += f'#{message["category"]} — '
+    if message.tags:
+        for tag in message.tags:
+            msg += f'#{tag} '
+        msg += '— '
 
-    msg += f'<strong>{telegram_escape(message["title"])}</strong>'
+    msg += f'<strong>{telegram_escape(message.title)}</strong>'
 
-    if message['description']:
-        msg += f'\n\n<i>{telegram_escape(message["description"])}</i>'
+    if message.description:
+        msg += f'\n\n<i>{telegram_escape(message.description)}</i>'
 
-    msg += f'\n\n📰 <a href="{message["link"]}">Leggi articolo</a>'
+    msg += f'\n\n📰 <a href="{message.link}">Leggi articolo</a>'
 
     if telegram_message_id:
         payload = {
@@ -200,7 +216,7 @@ def send_message(message, telegram_message_id=None) -> int:
         resp = requests.post(f'{TELEGRAM_API_URL}/sendPhoto',
                              data=payload,
                              files={
-                                 'photo': open(message['image'], 'rb')
+                                 'photo': open(message.image, 'rb')
                              })
 
     # Error while editing
