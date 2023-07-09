@@ -116,7 +116,6 @@ def process_new_article(entry):
 
 
 def fetch_article_details(link: str) -> dict:
-    # TODO: catch
     resp = requests.get(
         link + '?_=' + str(int(time.time())),  # fix for 404 ending up in the dolomiti cache
         headers={
@@ -124,6 +123,8 @@ def fetch_article_details(link: str) -> dict:
         },
         timeout=10
     )
+
+    resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, 'html.parser')
 
