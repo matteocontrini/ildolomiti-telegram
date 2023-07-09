@@ -25,8 +25,9 @@ DATABASE_PATH = os.environ.get('DATABASE_PATH', 'ildolomiti.db')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s - %(message)s',
                     datefmt='%Y-%m-%dT%H:%M:%S%z', stream=sys.stdout)
-
 logger = logging.getLogger(__name__)
+
+logger.info('Database path: ' + DATABASE_PATH)
 
 db = SqliteDatabase(DATABASE_PATH)
 
