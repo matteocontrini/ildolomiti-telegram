@@ -43,34 +43,29 @@ def check():
     feed = feedparser.parse('https://www.ildolomiti.it/rss.xml?_=' + str(int(time.time())))
 
     if Article.select().count() == 0:
-        logger.info('First run, populating database...')
-        for entry in reversed(feed.entries):
-            article = Article(
-                post_id=None,
-                title=entry.title,
-                link=entry.link,
-                published=int(time.mktime(entry.published_parsed)),
-                telegram_message_id=None
-            )
-            article.save()
-        logger.info('Done!')
+        first_run(feed)
         return
 
     for entry in reversed(feed.entries):
         article = Article.get_or_none(link=entry.link)
-        if article:
-            continue
-        else:
+        if not article:
             process_new_article(entry)
 
     logger.info('Done!')
 
 
-def update_article(article: Article, entry):
-    logger.info(f'Updating article: {entry.link}')
-
-    article.title = entry.title
-    article.save()
+def first_run(feed):
+    logger.info('First run, populating database...')
+    for entry in reversed(feed.entries):
+        article = Article(
+            post_id=None,
+            title=entry.title,
+            link=entry.link,
+            published=int(time.mktime(entry.published_parsed)),
+            telegram_message_id=None
+        )
+        article.save()
+    logger.info('Done!')
 
 
 def process_new_article(entry):
@@ -231,7 +226,8 @@ def send_log(article: Article, entry):
             'text': f'<code>{telegram_escape(article.title)}</code>\n\n'
                     f'<code>{telegram_escape(entry.title)}</code>\n\n'
                     f'<code>{telegram_escape(article.link)}</code>\n\n'
-                    f'<code>{telegram_escape(entry.link)}</code>',
+                    f'<code>{telegram_escape(entry.link)}</code>\n\n'
+                    f'<code>{telegram_escape(article.telegram_message_id)}</code>\n\n',
             'parse_mode': 'HTML',
         })
     except (Exception,):
