@@ -240,7 +240,7 @@ def send_log(article: Article, entry):
                     f'<code>{telegram_escape(entry.title)}</code>\n\n'
                     f'<code>{telegram_escape(article.link)}</code>\n\n'
                     f'<code>{telegram_escape(entry.link)}</code>\n\n'
-                    f'<code>{telegram_escape(article.telegram_message_id)}</code>\n\n',
+                    f'<code>{article.telegram_message_id}</code>',
             'parse_mode': 'HTML',
         })
     except (Exception,):
