@@ -19,6 +19,8 @@ BOT_TOKEN = os.environ['BOT_TOKEN']
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
 CHANNEL_ID = -1001626800013
 
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s - %(message)s',
                     datefmt='%Y-%m-%dT%H:%M:%S%z', stream=sys.stdout)
 
@@ -241,17 +243,52 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
 
 def send_log(article: Article, entry):
     try:
+        explanation = get_diff_explanation(article.title, entry.title)
+    except (Exception,):
+        logger.exception('Error getting diff explanation')
+        explanation = ''
+
+    try:
         requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', json={
             'chat_id': CHANNEL_ID,
             'text': f'<code>{telegram_escape(article.title)}</code>\n\n'
                     f'<code>{telegram_escape(entry.title)}</code>\n\n'
+                    f'{explanation}'
                     f'<code>{telegram_escape(article.link)}</code>\n\n'
                     f'<code>{telegram_escape(entry.link)}</code>\n\n'
-                    f'<code>{article.telegram_message_id}</code>',
+                    f'Message ID: <code>{article.telegram_message_id}</code>',
             'parse_mode': 'HTML',
         })
     except (Exception,):
         logger.exception('Error sending log')
+
+
+def get_diff_explanation(old_title: str, new_title: str) -> str:
+    if not OPENAI_API_KEY:
+        return ''
+
+    resp = requests.post(
+        'https://api.openai.com/v1/chat/completions',
+        json={
+            'model': 'gpt-3.5-turbo',
+            'messages': [{
+                'role': 'user',
+                'content': f'Titolo vecchio: {old_title}\n\n'
+                           f'Titolo nuovo: {new_title}\n\n'
+                           'Dimmi in una breve frase cosa è cambiato nel nuovo titolo'
+            }],
+        },
+        headers={
+            'Authorization': 'Bearer ' + OPENAI_API_KEY,
+        }
+    )
+
+    resp.raise_for_status()
+
+    explanation = resp.json()['choices'][0]['message']['content']
+    explanation = f'<code>{telegram_escape(explanation)}</code>\n\n' if explanation else ''
+
+    return explanation
 
 
 def telegram_escape(text: str) -> str:
