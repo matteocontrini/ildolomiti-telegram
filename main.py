@@ -79,17 +79,24 @@ def first_run(feed):
 
 
 def process_new_article(entry):
-    tag = re.match(r'https://www\.ildolomiti\.it/(\w+)/', entry.link)
+    tag = re.match(r'https://www\.ildolomiti\.it/([a-z-]+)/', entry.link)
     tag = tag.group(1) if tag else None
     if tag == 'blog' or tag == 'necrologi' or tag == 'video':
         return
+
+    # es. "ricerca-e-universita" -> #ricerca #universita
+    if '-' in tag:
+        tags = tag.split('-')
+        tags = [t for t in tags if len(t) > 1]
+    else:
+        tags = [tag]
 
     details = fetch_article_details(entry.link)
 
     message = TelegramMessage(
         title=entry.title.strip(),
         link=entry.link,
-        tags=[tag] + details['tags'],
+        tags=tags + details['tags'],
         description=details['description'] or entry.description,
         image=details['image'] or 'fallback.jpg',
     )
