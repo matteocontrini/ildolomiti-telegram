@@ -205,13 +205,9 @@ def send_message(message, telegram_message_id=None) -> int:
 
     # Error while editing
     if resp.status_code != 200 and telegram_message_id:
-        # Ignore 'message is not modified' error
-        if resp.status_code == 400 and 'message is not modified' in resp.text:
-            return 0
-
-        # Log but don't raise
+        # Log but don't raise (ignore error)
         logger.error(f'Error editing message: {resp.text}')
-        return 0
+        return telegram_message_id
     # Error while sending
     elif resp.status_code != 200:
         logger.error(f'Error sending message: {resp.text}')
