@@ -17,7 +17,8 @@ from requests import RequestException
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
-CHANNEL_ID = -1001626800013
+TELEGRAM_CHANNEL = '@ildolomitinews'
+TELEGRAM_LOGS_CHANNEL = -1001626800013
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
@@ -213,7 +214,7 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
 
     if telegram_message_id:
         payload = {
-            'chat_id': CHANNEL_ID,
+            'chat_id': TELEGRAM_CHANNEL,
             'message_id': telegram_message_id,
             'caption': msg,
             'parse_mode': 'HTML',
@@ -221,7 +222,7 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
         resp = requests.post(f'{TELEGRAM_API_URL}/editMessageCaption', json=payload)
     else:
         payload = {
-            'chat_id': CHANNEL_ID,
+            'chat_id': TELEGRAM_CHANNEL,
             'caption': msg,
             'parse_mode': 'HTML',
         }
@@ -253,7 +254,7 @@ def send_log(article: Article, entry):
 
     try:
         requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', json={
-            'chat_id': CHANNEL_ID,
+            'chat_id': TELEGRAM_LOGS_CHANNEL,
             'text': f'<strong>{telegram_escape(article.title)}</strong>\n\n'
                     f'<strong>{telegram_escape(entry.title)}</strong>\n\n'
                     f'{explanation}'
