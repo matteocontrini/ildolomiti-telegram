@@ -254,8 +254,8 @@ def send_log(article: Article, entry):
     try:
         requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', json={
             'chat_id': CHANNEL_ID,
-            'text': f'<code>{telegram_escape(article.title)}</code>\n\n'
-                    f'<code>{telegram_escape(entry.title)}</code>\n\n'
+            'text': f'<strong>{telegram_escape(article.title)}</strong>\n\n'
+                    f'<strong>{telegram_escape(entry.title)}</strong>\n\n'
                     f'{explanation}'
                     f'<code>{telegram_escape(article.link)}</code>\n\n'
                     f'<code>{telegram_escape(entry.link)}</code>\n\n'
@@ -289,7 +289,7 @@ def get_diff_explanation(old_title: str, new_title: str) -> str:
     resp.raise_for_status()
 
     explanation = resp.json()['choices'][0]['message']['content']
-    explanation = f'<code>{telegram_escape(explanation)}</code>\n\n' if explanation else ''
+    explanation = f'👉 {telegram_escape(explanation)}\n\n' if explanation else ''
 
     return explanation
 
