@@ -318,7 +318,7 @@ if __name__ == '__main__':
     check()
 
     scheduler = BlockingScheduler()
-    scheduler.add_job(check, trigger=CronTrigger(minute='*/10'))
+    scheduler.add_job(check, trigger=CronTrigger(minute='*/9'))
     scheduler.add_job(clean, trigger=CronTrigger(minute='5', hour='1'))
 
     try:
