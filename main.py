@@ -14,6 +14,8 @@ from apscheduler.triggers.cron import CronTrigger
 from bs4 import BeautifulSoup
 from peewee import SqliteDatabase, Model, TextField, IntegerField
 from requests import RequestException
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
@@ -187,7 +189,10 @@ def download_image(image_url: str) -> Optional[str]:
     if not image_url:
         return None
     try:
-        resp = requests.get(image_url, timeout=10)
+        session = requests.Session()
+        retries = Retry(total=2, status_forcelist=[502, 503, 504])
+        session.mount('https://', HTTPAdapter(max_retries=retries))
+        resp = session.get(image_url, timeout=10)
         resp.raise_for_status()
         filename = 'images/' + md5(image_url.encode('utf-8')).hexdigest()
         with open(filename, 'wb') as f:
