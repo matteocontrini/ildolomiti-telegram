@@ -4,6 +4,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
+from difflib import ndiff
 from hashlib import md5
 from typing import Optional
 
@@ -21,8 +22,6 @@ BOT_TOKEN = os.environ['BOT_TOKEN']
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
 TELEGRAM_CHANNEL = '@ildolomitinews'
 TELEGRAM_LOGS_CHANNEL = -1001626800013
-
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 
 DATABASE_PATH = os.environ.get('DATABASE_PATH', 'ildolomiti.db')
 
@@ -252,17 +251,15 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
 
 def send_log(article: Article, entry):
     try:
-        explanation = get_diff_explanation(article.title, entry.title)
-    except (Exception,):
-        logger.exception('Error getting diff explanation')
-        explanation = ''
+        diff = get_diff(
+            telegram_escape(article.title),
+            telegram_escape(entry.title)
+        )
 
-    try:
         requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', json={
             'chat_id': TELEGRAM_LOGS_CHANNEL,
-            'text': f'<strong>{telegram_escape(article.title)}</strong>\n\n'
-                    f'<strong>{telegram_escape(entry.title)}</strong>\n\n'
-                    f'{explanation}'
+            'text': f'{diff[0]}\n\n'
+                    f'{diff[1]}\n\n'
                     f'<code>{telegram_escape(article.link)}</code>\n\n'
                     f'<code>{telegram_escape(entry.link)}</code>\n\n'
                     f'Message ID: <code>{article.telegram_message_id}</code>',
@@ -272,32 +269,56 @@ def send_log(article: Article, entry):
         logger.exception('Error sending log')
 
 
-def get_diff_explanation(old_title: str, new_title: str) -> str:
-    if not OPENAI_API_KEY:
-        return ''
+def get_diff(old: str, new: str) -> list[str]:
+    removed_from_old = get_diff_removals(old, new)
+    removed_from_new = get_diff_removals(new, old)
 
-    resp = requests.post(
-        'https://api.openai.com/v1/chat/completions',
-        json={
-            'model': 'gpt-3.5-turbo',
-            'messages': [{
-                'role': 'user',
-                'content': f'Titolo vecchio: {old_title}\n\n'
-                           f'Titolo nuovo: {new_title}\n\n'
-                           'Dimmi in una breve frase cosa è cambiato nel nuovo titolo'
-            }],
-        },
-        headers={
-            'Authorization': 'Bearer ' + OPENAI_API_KEY,
-        }
-    )
+    offset = 0
+    for group in removed_from_old:
+        start = group[0] + offset
+        end = group[-1] + 1 + offset
+        old = old[:start] + '<b><u>' + old[start:end] + '</u></b>' + old[end:]
+        offset += len('<u></u><b></b>')
 
-    resp.raise_for_status()
+    offset = 0
+    for group in removed_from_new:
+        start = group[0] + offset
+        end = group[-1] + 1 + offset
+        new = new[:start] + '<b><u>' + new[start:end] + '</u></b>' + new[end:]
+        offset += len('<u></u><b></b>')
 
-    explanation = resp.json()['choices'][0]['message']['content']
-    explanation = f'👉 {telegram_escape(explanation)}\n\n' if explanation else ''
+    return [old, new]
 
-    return explanation
+
+def get_diff_removals(first: str, second: str) -> list:
+    diff = ndiff(first, second)
+
+    removed = []
+    offset = 0
+
+    for i, s in enumerate(diff):
+        if s[0] == ' ':
+            continue
+        elif s[0] == '+':
+            offset -= 1
+        elif s[0] == '-':
+            removed.append(i + offset)
+
+    groups = []
+    group = []
+    for i in range(len(removed)):
+        if i == 0:
+            group.append(removed[i])
+        elif removed[i] - removed[i - 1] == 1:
+            group.append(removed[i])
+        else:
+            groups.append(group)
+            group = [removed[i]]
+
+    if group:
+        groups.append(group)
+
+    return groups
 
 
 def telegram_escape(text: str) -> str:
