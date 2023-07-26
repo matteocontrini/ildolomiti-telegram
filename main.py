@@ -9,6 +9,7 @@ from hashlib import md5
 from typing import Optional
 
 import feedparser
+import humanize
 import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -256,13 +257,16 @@ def send_log(article: Article, entry):
             telegram_escape(entry.title)
         )
 
+        timeago = humanize.naturaltime(time.time() - article.published)
+
         requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', json={
             'chat_id': TELEGRAM_LOGS_CHANNEL,
             'text': f'{diff[0]}\n\n'
                     f'{diff[1]}\n\n'
                     f'<code>{telegram_escape(article.link)}</code>\n\n'
                     f'<code>{telegram_escape(entry.link)}</code>\n\n'
-                    f'Message ID: <code>{article.telegram_message_id}</code>',
+                    f'Message ID: <code>{article.telegram_message_id}</code>\n',
+                    f'Published: {timeago}'
             'parse_mode': 'HTML',
         })
     except (Exception,):

@@ -9,6 +9,7 @@ feedparser = "*"
 peewee = "*"
 requests = "*"
 beautifulsoup4 = "*"
+humanize = "*"
 
 [dev-packages]
 
