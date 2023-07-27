@@ -265,8 +265,8 @@ def send_log(article: Article, entry):
                     f'{diff[1]}\n\n'
                     f'<code>{telegram_escape(article.link)}</code>\n\n'
                     f'<code>{telegram_escape(entry.link)}</code>\n\n'
-                    f'Message ID: <code>{article.telegram_message_id}</code>\n',
-                    f'Published: {timeago}'
+                    f'Message ID: <code>{article.telegram_message_id}</code>\n'
+                    f'Published: {timeago}',
             'parse_mode': 'HTML',
         })
     except (Exception,):
