@@ -58,7 +58,10 @@ class TelegramMessage:
 def check():
     logger.info('Checking...')
 
-    feed = feedparser.parse('https://www.ildolomiti.it/rss.xml?_=' + str(int(time.time())))
+    url = 'https://www.ildolomiti.it/rss.xml?_=' + str(int(time.time()))
+    logger.info(f'Fetching {url}')
+
+    feed = feedparser.parse(url)
 
     if Article.select().count() == 0:
         first_run(feed)
