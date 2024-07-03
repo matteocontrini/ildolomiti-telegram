@@ -62,6 +62,9 @@ def check():
     logger.info(f'Fetching {url}')
 
     feed = feedparser.parse(url)
+    if feed.bozo:
+        logger.error(f'Error parsing feed: {feed.bozo_exception}')
+        return
 
     if Article.select().count() == 0:
         first_run(feed)
