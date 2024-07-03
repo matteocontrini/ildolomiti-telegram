@@ -61,7 +61,16 @@ def check():
     url = 'https://www.ildolomiti.it/rss.xml?_=' + str(int(time.time()))
     logger.info(f'Fetching {url}')
 
-    feed = feedparser.parse(url)
+    resp = requests.get(url, headers={
+        'User-Agent': 'Il Dolomiti Telegram (+https://github.com/matteocontrini/ildolomiti-telegram)'
+    })
+
+    if resp.status_code != 200:
+        logger.error(f'Error fetching feed ({resp.status_code}): {resp.text}')
+        return
+
+    feed = feedparser.parse(resp.text)
+
     if feed.bozo:
         logger.error(f'Error parsing feed: {feed.bozo_exception}')
         return
