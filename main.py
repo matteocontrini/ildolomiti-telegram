@@ -21,7 +21,7 @@ from urllib3.util import Retry
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 TELEGRAM_API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
-TELEGRAM_CHANNEL = '@ildolomitinews'
+TELEGRAM_CHANNEL = os.environ.get('TELEGRAM_CHANNEL', '@ildolomitinews')
 TELEGRAM_LOGS_CHANNEL = -1001626800013
 
 DATABASE_PATH = os.environ.get('DATABASE_PATH', 'ildolomiti.db')
