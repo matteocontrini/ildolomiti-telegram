@@ -1,14 +1,14 @@
 # Il Dolomiti Telegram
 
-This repository contains the robot that powers the [@TODO](https://t.me/) Telegram channel.
+This repository contains the robot that powers the @TODO Telegram channel.
 
-Compared to a basic RSS feed to Telegram publisher, and the [official Telegram channel](https://t.me/ildolomitinews), it features:
+Compared to a basic RSS feed to Telegram publisher, and the official Telegram channel [@ildolomitinews](https://t.me/ildolomitinews), it features:
 
 - Duplicate article detection based on Drupal's node ID. When the title of an article changes, the already sent Telegram message is modified.
 - Retry at next round when an article fetch fails.
 - Download images and upload them "manually" to Telegram API to avoid fetch failures. Fallback to a placeholder image if the image couldn't be downloaded.
 - Cache busting on article URLs, to avoid incurring into 404. In previous implementations, if you requested an article too soon it would 404 and stay 404 in the edge cache for that particular request.
-- Tag parsing.
+- Improved tag parsing.
 
 Not all articles are published immediately. Some are saved for later and published in a daily digest message:
 - Articles marked as Trento or Bolzano are published immediately.
