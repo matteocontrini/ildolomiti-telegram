@@ -330,8 +330,7 @@ def classify_article(title: str, description: str, excerpt: str) \
     classification_reasoning = None
     served_model = None
 
-    prompt = f'''Classify this Italian news article by its primary geographic area and extract the place where
-the main event happened.
+    prompt = f'''Classify this news article published by Il Dolomiti by its primary geographic area and extract the place where the event happened.
 
 Choose exactly one area:
 - trento: Province of Trento
