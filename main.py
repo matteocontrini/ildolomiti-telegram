@@ -345,9 +345,12 @@ Choose exactly one area:
 - altro: outside Italy or the location cannot be determined
 
 For place, first determine whether the event is an accident.
-If accident, choose the name of the place (city, locality, mountain, road, etc.) where the event happened.
-Multiple names are allowed. Use the broad area if the place cannot be determined.
-If not accident, return null.
+- If accident, extract the name of the place (city, locality, mountain, etc.) where the event happened.
+  Multiple names are allowed.
+  Include road name (e.g. A22, SS47) when available.
+  Use the broad area if the place cannot be determined.
+  Do not infer names from memory.
+- If not accident, return null.
 
 Output example:
 {{ "area": "trento", "place": "Dro" }}
