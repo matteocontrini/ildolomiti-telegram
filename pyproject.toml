@@ -1,0 +1,15 @@
+[project]
+name = "ildolomiti-telegram"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "apscheduler<4",
+    "beautifulsoup4",
+    "feedparser",
+    "humanize",
+    "peewee",
+    "requests",
+]
+
+[tool.uv]
+package = false

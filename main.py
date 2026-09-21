@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -14,7 +15,7 @@ import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from bs4 import BeautifulSoup
-from peewee import SqliteDatabase, Model, TextField, IntegerField
+from peewee import SqliteDatabase, Model, TextField, IntegerField, BooleanField
 from requests import RequestException
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
@@ -25,6 +26,46 @@ TELEGRAM_CHANNEL = os.environ.get('TELEGRAM_CHANNEL', '@ildolomitinews')
 TELEGRAM_LOGS_CHANNEL = -1001626800013
 
 DATABASE_PATH = os.environ.get('DATABASE_PATH', 'ildolomiti.db')
+OPENROUTER_MODELS = os.environ.get(
+    'OPENROUTER_MODELS',
+    'openai/gpt-oss-120b,qwen/qwen3.8-flash,mistralai/mistral-small-2603',
+).split(',')
+
+# Some articles are explicitly marked with an area, we map them to these areas
+MARKERS_TO_AREAS = {
+    'trento': 'trento',
+    'bolzano': 'bolzano',
+    'belluno': 'veneto',
+    'sondrio': 'lombardia',
+    'fvg': 'friuli_venezia_giulia',
+}
+
+# Articles without an explicit area are classified by AI to one of these areas
+CLASSIFIED_AREAS = {
+    'trento',
+    'bolzano',
+    'veneto',
+    'lombardia',
+    'friuli_venezia_giulia',
+    'lago_di_garda',
+    'tirolo',
+    'italia',
+    'altro',
+}
+
+# Only these two areas are immediately published, the others go in the daily digest
+IMMEDIATE_PUBLISHING_AREAS = {'trento', 'bolzano'}
+
+# Digest rendering
+DIGEST_AREAS = (
+    ('lago_di_garda', 'Lago di Garda'),
+    ('tirolo', 'Tirolo'),
+    ('veneto', 'Veneto'),
+    ('lombardia', 'Lombardia'),
+    ('friuli_venezia_giulia', 'Friuli-Venezia Giulia'),
+    ('italia', 'Italia'),
+    ('altro', 'Altro'),
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s - %(message)s',
                     datefmt='%Y-%m-%dT%H:%M:%S%z', stream=sys.stdout)
@@ -36,11 +77,15 @@ db = SqliteDatabase(DATABASE_PATH)
 
 
 class Article(Model):
-    post_id = IntegerField(null=True)
+    post_id = IntegerField(null=True, unique=True)
     title = TextField()
-    link = TextField()
+    link = TextField(unique=True)
     published = IntegerField()
     telegram_message_id = IntegerField(null=True)
+    is_digest = BooleanField(default=False)
+    area = TextField(null=True)
+    classification_reasoning = TextField(null=True)
+    classification_model = TextField(null=True)
 
     class Meta:
         database = db
@@ -80,8 +125,7 @@ def check():
         return
 
     for entry in reversed(feed.entries):
-        article = Article.get_or_none(link=entry.link)
-        if not article:
+        if not Article.get_or_none(link=entry.link):
             process_new_article(entry)
 
     logger.info('Done!')
@@ -108,34 +152,76 @@ def process_new_article(entry):
         return
 
     # es. "ricerca-e-universita" -> #ricerca #universita
-    if '-' in tag:
+    if tag and '-' in tag:
         tags = tag.split('-')
         tags = [t for t in tags if len(t) > 1]
     else:
-        tags = [tag]
+        tags = [tag] if tag else []
 
     details = fetch_article_details(entry.link)
+    description = details['description'] or entry.description
+
+    post_id = details['post_id']
+    article = Article.get_or_none(post_id=post_id) if post_id else None
+
+    # Post was already queued for the digest, but the link/title have changed
+    if article and article.is_digest:
+        logger.info(f'Updating digest article: {entry.link} (old: {article.link})')
+        article.title = entry.title.strip()
+        article.link = entry.link
+        article.save()
+        return
+
+    classification_reasoning = classification_model = None
+
+    # Don't publish if the declared or classified area is not for immediate publishing
+    if not article:
+        area = details['area']
+        if not area:
+            logger.info(f'Area not declared for {entry.link}, classifying...')
+            area, classification_reasoning, classification_model = classify_area(
+                entry.title, description, details['excerpt']
+            )
+            logger.info(f'Classified {entry.link} as {area}')
+            send_classification_log(
+                entry.title, entry.link, area, classification_reasoning, classification_model
+            )
+        if area not in IMMEDIATE_PUBLISHING_AREAS:
+            logger.info(f'Queuing {area} article: {entry.link}')
+            Article.create(
+                post_id=post_id,
+                title=entry.title.strip(),
+                link=entry.link,
+                published=int(time.mktime(entry.published_parsed)),
+                area=area,
+                is_digest=True,
+                classification_reasoning=classification_reasoning,
+                classification_model=classification_model,
+            )
+            return
 
     message = TelegramMessage(
         title=entry.title.strip(),
         link=entry.link,
-        tags=tags + details['tags'],
-        description=details['description'] or entry.description,
-        image=details['image'] or 'fallback.jpg',
+        tags=tags,
+        description=description,
+        image=download_image(details['image_url']) or 'fallback.jpg',
     )
 
-    # Title is different, since we could match the post by post ID but couldn't by link/title
-    if details['post_id'] and (article := Article.get_or_none(post_id=details['post_id'])):
+    # The post could be matched by post ID but not by link (and therefore title), which means
+    # the title changed and we should update the Telegram message.
+    if article:
         article: Article
         logger.info(f'Updating article: {entry.link} (old: {article.link})')
         if not article.telegram_message_id:
             logger.error('Article has no telegram_message_id, skipping')
+            return
         try:
             send_message(message, article.telegram_message_id)
         except RequestException:
             logger.exception('Error updating message')
             return  # so that it's retried later
-        send_log(article, entry)
+        send_title_diff_log(article, entry)
         article.title = message.title
         article.link = message.link
         article.save()
@@ -152,7 +238,10 @@ def process_new_article(entry):
             title=message.title,
             link=message.link,
             published=time.mktime(entry.published_parsed),
-            telegram_message_id=message_id
+            telegram_message_id=message_id,
+            area=area,
+            classification_reasoning=classification_reasoning,
+            classification_model=classification_model,
         )
 
 
@@ -171,7 +260,8 @@ def fetch_article_details(link: str) -> dict:
 
     post_id = None
     description = None
-    image = None
+    excerpt = ''
+    image_url = None
 
     article = soup.select_one('article[id^="node-"]')
     if article:
@@ -181,23 +271,136 @@ def fetch_article_details(link: str) -> dict:
             description = description.text.strip()
         else:
             logger.error('Description not found')
+        # Extract first two paragraphs capped to 2000 chars
+        paragraphs = article.select('.field-name-body p')[:2]
+        excerpt = ' '.join(p.get_text(' ', strip=True) for p in paragraphs)[:2000]
         image_url = soup.find('meta', property='og:image')
         if image_url:
             image_url = image_url['content']
-            image = download_image(image_url)
         else:
             logger.error('Image meta tag not found')
     else:
         logger.error('Article node not found')
 
-    tags = ['belluno'] if 'section="BELLUNO"' in resp.text else []
+    # Extract the area marker, e.g. "/sondrio" -> "sondrio"
+    marker = soup.select_one('.zona-marker[href]')
+    marker = marker['href'].strip('/') if marker else None
+    # And map it to the area name, e.g. "sondrio" -> "lombardia"
+    area = MARKERS_TO_AREAS.get(marker) if marker else None
 
     return {
         'post_id': post_id,
         'description': description,
-        'image': image,
-        'tags': tags,
+        'excerpt': excerpt,
+        'image_url': image_url,
+        'area': area,
     }
+
+
+def classify_area(title: str, description: str, excerpt: str) -> tuple[str, Optional[str], Optional[str]]:
+    api_key = os.environ.get('OPENROUTER_API_KEY')
+    if not api_key:
+        logger.error('OPENROUTER_API_KEY is not set, classifying article as altro')
+        return 'altro', None, None
+
+    classification_reasoning = None
+    served_model = None
+
+    prompt = f'''Classify this Italian news article by its primary geographic area.
+
+Choose exactly one area:
+- trento: Province of Trento
+- bolzano: Province of Bolzano
+- veneto: Veneto, except articles primarily about Lake Garda
+- lombardia: Lombardia, except articles primarily about Lake Garda
+- friuli_venezia_giulia: Friuli-Venezia Giulia
+- lago_di_garda: Lake Garda or a place directly on its shores outside the Province of Trento is the primary setting
+- tirolo: Austrian state of Tyrol, excluding Alto Adige/Südtirol
+- italia: elsewhere in Italy or a national Italian story
+- altro: outside Italy or the location cannot be determined
+
+<article title="{title}">
+{description}
+
+{excerpt}
+</article>'''
+
+    try:
+        payload = {
+            'models': OPENROUTER_MODELS,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'reasoning': {'effort': 'high'},
+            'max_tokens': 2048,
+            'provider': {
+                'require_parameters': True,
+                'sort': {'by': 'price', 'partition': 'model'},
+                'preferred_min_throughput': {'p50': 100},
+            },
+            'response_format': {
+                'type': 'json_schema',
+                'json_schema': {
+                    'name': 'area_classification',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'area': {'type': 'string', 'enum': sorted(CLASSIFIED_AREAS)},
+                        },
+                        'required': ['area'],
+                        'additionalProperties': False,
+                    },
+                },
+            }
+        }
+        for attempt in range(3):
+            response = requests.post(
+                'https://openrouter.ai/api/v1/chat/completions',
+                headers={'Authorization': f'Bearer {api_key}'},
+                json=payload,
+                timeout=60,
+            )
+            if response.status_code != 429 or attempt == 2:
+                break
+            wait = 2 ** attempt
+            logger.warning(f'OpenRouter rate limited the request, retrying in {wait}s')
+            time.sleep(wait)
+
+        if response.status_code != 200:
+            logger.error(
+                f'OpenRouter API error ({response.status_code}): {response.text}. '
+                'Classifying article as altro'
+            )
+            return 'altro', None, None
+
+        response_data = response.json()
+        response_model = response_data.get('model')
+        served_model = response_model if isinstance(response_model, str) else None
+        logger.info(f'OpenRouter used {served_model or "unknown model"}')
+        message = response_data['choices'][0]['message']
+        assert isinstance(message, dict), 'OpenRouter returned an invalid message'
+
+        # Providers normally expose their plaintext reasoning in this normalized field.
+        reasoning = message.get('reasoning')
+        classification_reasoning = reasoning if isinstance(reasoning, str) and reasoning else None
+        if classification_reasoning is None and isinstance(message.get('reasoning_details'), list):
+            # Otherwise inspect the structured blocks: prefer raw text, then summaries.
+            details = message['reasoning_details']
+            raw_reasoning = [detail['text'] for detail in details
+                             if isinstance(detail, dict) and isinstance(detail.get('text'), str)]
+            summaries = [detail['summary'] for detail in details
+                         if isinstance(detail, dict) and isinstance(detail.get('summary'), str)]
+            classification_reasoning = '\n'.join(raw_reasoning or summaries)
+        if classification_reasoning:
+            logger.info(f'{served_model or "unknown model"} thinking: {classification_reasoning}')
+
+        output_text = message.get('content')
+        assert isinstance(output_text, str), 'OpenRouter returned invalid message content'
+        result = json.loads(output_text)
+        area = result['area']
+        return area if area in CLASSIFIED_AREAS else 'altro', classification_reasoning, served_model
+    except Exception:
+        logger.exception('Error classifying article, classifying as altro')
+        return 'altro', classification_reasoning, served_model
 
 
 def download_image(image_url: str) -> Optional[str]:
@@ -265,7 +468,7 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
     return resp.json()['result']['message_id']
 
 
-def send_log(article: Article, entry):
+def send_title_diff_log(article: Article, entry):
     try:
         diff = get_diff(
             telegram_escape(article.title),
@@ -286,6 +489,24 @@ def send_log(article: Article, entry):
         })
     except (Exception,):
         logger.exception('Error sending log')
+
+
+def send_classification_log(title: str, link: str, area: str,
+                            reasoning: Optional[str], model: Optional[str]):
+    try:
+        response = requests.post(f'{TELEGRAM_API_URL}/sendMessage', json={
+            'chat_id': TELEGRAM_LOGS_CHANNEL,
+            'text': '<strong>Article classification</strong>\n\n'
+                    f'<strong>{telegram_escape(title)}</strong>\n'
+                    f'<code>{telegram_escape(link)}</code>\n\n'
+                    f'Area: <code>{telegram_escape(area)}</code>\n'
+                    f'Model: <code>{telegram_escape(model or "unknown")}</code>\n\n'
+                    f'<pre>{telegram_escape(reasoning or "No reasoning returned")[:2500]}</pre>',
+            'parse_mode': 'HTML',
+        }, timeout=10)
+        response.raise_for_status()
+    except (Exception,):
+        logger.exception('Error sending classification log')
 
 
 def get_diff(old: str, new: str) -> list[str]:
@@ -344,11 +565,71 @@ def telegram_escape(text: str) -> str:
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
+def build_digest_messages(articles: list[Article]) -> list[tuple[str, list[int]]]:
+    digest_header = '🗞️ <strong>Altre notizie</strong>'
+    messages = []
+    text = digest_header
+    article_ids = []
+
+    for area, label in DIGEST_AREAS:
+        area_articles = [article for article in articles if article.area == area]
+        if not area_articles:
+            continue
+
+        heading = f'\n\n<strong>{label}</strong>'
+        for index, article in enumerate(area_articles):
+            line = f'\n• <a href="{telegram_escape(article.link)}">{telegram_escape(article.title)}</a>'
+            addition = (heading if index == 0 else '') + line
+            if article_ids and len(text) + len(addition) > 4096:
+                messages.append((text, article_ids))
+                text = digest_header
+                article_ids = []
+                addition = heading + line
+            text += addition
+            article_ids.append(article.id)
+
+    if article_ids:
+        messages.append((text, article_ids))
+    return messages
+
+
+def send_daily_digest():
+    articles = list(
+        Article.select()
+        .where(Article.is_digest & Article.telegram_message_id.is_null())
+        .order_by(Article.published)
+    )
+    if not articles:
+        logger.info('No articles for the daily digest')
+        return
+
+    for text, article_ids in build_digest_messages(articles):
+        try:
+            response = requests.post(
+                f'{TELEGRAM_API_URL}/sendMessage',
+                json={
+                    'chat_id': TELEGRAM_CHANNEL,
+                    'text': text,
+                    'parse_mode': 'HTML',
+                    'disable_web_page_preview': True,
+                },
+                timeout=10,
+            )
+            response.raise_for_status()
+            message_id = response.json()['result']['message_id']
+        except (RequestException, KeyError, TypeError, ValueError):
+            logger.exception('Error sending daily digest')
+            return
+
+        Article.update(telegram_message_id=message_id).where(Article.id.in_(article_ids)).execute()
+        logger.info(f'Sent daily digest message {message_id} with {len(article_ids)} articles')
+
+
 def clean():
     logger.info('Cleaning old articles')
-    # Keep the last 200 articles
+    # Keep the last 1000 articles
     Article.delete().where(Article.id.not_in(
-        Article.select(Article.id).order_by(Article.id.desc()).limit(200)
+        Article.select(Article.id).order_by(Article.id.desc()).limit(1000)
     )).execute()
 
     logger.info('Cleaning old images')
@@ -365,6 +646,7 @@ if __name__ == '__main__':
 
     scheduler = BlockingScheduler()
     scheduler.add_job(check, trigger=CronTrigger(minute='*/9'))
+    scheduler.add_job(send_daily_digest, trigger=CronTrigger(hour='18', minute='30', timezone='Europe/Rome'))
     scheduler.add_job(clean, trigger=CronTrigger(minute='5', hour='1'))
 
     try:
