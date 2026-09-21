@@ -32,6 +32,12 @@ OPENROUTER_MODELS = os.environ.get(
     'openai/gpt-oss-120b,qwen/qwen3.8-flash,mistralai/mistral-small-2603',
 ).split(',')
 
+USER_AGENT = (
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/152.0.0.0 Safari/537.36'
+)
+
 # Some articles are explicitly marked with an area, we map them to these areas
 MARKERS_TO_AREAS = {
     'trento': 'trento',
@@ -107,9 +113,7 @@ def check():
     url = 'https://www.ildolomiti.it/rss.xml?_=' + str(int(time.time()))
     logger.info(f'Fetching {url}')
 
-    resp = requests.get(url, headers={
-        'User-Agent': 'Il Dolomiti Telegram (+https://github.com/matteocontrini/ildolomiti-telegram)'
-    }, timeout=10)
+    resp = requests.get(url, headers={'User-Agent': USER_AGENT}, timeout=10)
 
     if resp.status_code != 200:
         logger.error(f'Error fetching feed ({resp.status_code}): {resp.text}')
@@ -249,9 +253,7 @@ def process_new_article(entry):
 def fetch_article_details(link: str) -> dict:
     resp = requests.get(
         link + '?_=' + str(int(time.time())),  # fix for 404 ending up in the dolomiti cache
-        headers={
-            'User-Agent': 'Il Dolomiti Telegram (+https://github.com/matteocontrini/ildolomiti-telegram)'
-        },
+        headers={'User-Agent': USER_AGENT},
         timeout=10
     )
 
