@@ -25,3 +25,9 @@ BOT_TOKEN=... OPENROUTER_API_KEY=... uv run main.py
 ```
 
 `OPENROUTER_MODELS` optionally overrides the comma-separated fallback order. See the source code for the default.
+
+## Testing
+
+```shell
+uv run python -m unittest discover -s tests -q
+```
