@@ -105,6 +105,7 @@ class TelegramMessage:
     tags: list[str]
     description: str
     image: str
+    place: Optional[str] = None
 
 
 def check():
@@ -177,33 +178,48 @@ def process_new_article(entry):
         article.save()
         return
 
-    classification_reasoning = classification_model = None
+    place = None
+    classification_reasoning = None
+    classification_model = None
+    area = details['area']
+
+    # LLM call, used for two purposes:
+    # - Extract the place for articles published immediately.
+    # - Extract also the area when it's not declared, so we can decide whether to publish it immediately.
+    if not area or area in IMMEDIATE_PUBLISHING_AREAS:
+        if area:
+            logger.info(f'Extracting place for {entry.link}...')
+        else:
+            logger.info(f'Area not declared for {entry.link}, classifying + extracting place...')
+        classified_area, place, classification_reasoning, classification_model = classify_article(
+            entry.title, description, details['excerpt']
+        )
+        if not area:
+            area = classified_area
+            logger.info(f'Classified {entry.link} as {area}')
+        if place:
+            logger.info(f'Extracted place "{place}" for {entry.link}')
+        else:
+            logger.info(f'No place extracted for {entry.link}')
+        send_classification_log(
+            entry.title, entry.link, area, place,
+            classification_reasoning, classification_model
+        )
 
     # Don't publish if the declared or classified area is not for immediate publishing
-    if not article:
-        area = details['area']
-        if not area:
-            logger.info(f'Area not declared for {entry.link}, classifying...')
-            area, classification_reasoning, classification_model = classify_area(
-                entry.title, description, details['excerpt']
-            )
-            logger.info(f'Classified {entry.link} as {area}')
-            send_classification_log(
-                entry.title, entry.link, area, classification_reasoning, classification_model
-            )
-        if area not in IMMEDIATE_PUBLISHING_AREAS:
-            logger.info(f'Queuing {area} article: {entry.link}')
-            Article.create(
-                post_id=post_id,
-                title=entry.title.strip(),
-                link=entry.link,
-                published=int(time.mktime(entry.published_parsed)),
-                area=area,
-                is_digest=True,
-                classification_reasoning=classification_reasoning,
-                classification_model=classification_model,
-            )
-            return
+    if not article and area not in IMMEDIATE_PUBLISHING_AREAS:
+        logger.info(f'Queuing {area} article: {entry.link}')
+        Article.create(
+            post_id=post_id,
+            title=entry.title.strip(),
+            link=entry.link,
+            published=int(time.mktime(entry.published_parsed)),
+            area=area,
+            is_digest=True,
+            classification_reasoning=classification_reasoning,
+            classification_model=classification_model,
+        )
+        return
 
     message = TelegramMessage(
         title=entry.title.strip(),
@@ -211,6 +227,7 @@ def process_new_article(entry):
         tags=tags,
         description=description,
         image=download_image(details['image_url']) or 'fallback.jpg',
+        place=place,
     )
 
     # The post could be matched by post ID but not by link (and therefore title), which means
@@ -303,16 +320,18 @@ def fetch_article_details(link: str) -> dict:
     }
 
 
-def classify_area(title: str, description: str, excerpt: str) -> tuple[str, Optional[str], Optional[str]]:
+def classify_article(title: str, description: str, excerpt: str) \
+        -> tuple[str, Optional[str], Optional[str], Optional[str]]:
     api_key = os.environ.get('OPENROUTER_API_KEY')
     if not api_key:
         logger.error('OPENROUTER_API_KEY is not set, classifying article as altro')
-        return 'altro', None, None
+        return 'altro', None, None, None
 
     classification_reasoning = None
     served_model = None
 
-    prompt = f'''Classify this Italian news article by its primary geographic area.
+    prompt = f'''Classify this Italian news article by its primary geographic area and extract the place where
+the main event happened.
 
 Choose exactly one area:
 - trento: Province of Trento
@@ -325,6 +344,14 @@ Choose exactly one area:
 - italia: elsewhere in Italy or a national Italian story
 - altro: outside Italy or the location cannot be determined
 
+For place, first determine whether the event is an accident.
+If accident, choose the name of the place (city, locality, mountain, road, etc.) where the event happened.
+Multiple names are allowed. Use the broad area if the place cannot be determined.
+If not accident, return null.
+
+Output example:
+{{ "area": "trento", "place": "Dro" }}
+
 <title>{title}</title>
 <description>{description}</description>
 <excerpt>{excerpt}</article>
@@ -334,7 +361,7 @@ Choose exactly one area:
         payload = {
             'models': OPENROUTER_MODELS,
             'messages': [{'role': 'user', 'content': prompt}],
-            'reasoning': {'effort': 'high'},
+            'reasoning': {'effort': 'medium'},
             'max_tokens': 2048,
             'provider': {
                 'require_parameters': True,
@@ -350,8 +377,9 @@ Choose exactly one area:
                         'type': 'object',
                         'properties': {
                             'area': {'type': 'string', 'enum': sorted(CLASSIFIED_AREAS)},
+                            'place': {'type': ['string', 'null']},
                         },
-                        'required': ['area'],
+                        'required': ['area', 'place'],
                         'additionalProperties': False,
                     },
                 },
@@ -375,13 +403,14 @@ Choose exactly one area:
                 f'OpenRouter API error ({response.status_code}): {response.text}. '
                 'Classifying article as altro'
             )
-            return 'altro', None, None
+            return 'altro', None, None, None
 
         response_data = response.json()
         response_model = response_data.get('model')
         served_model = response_model if isinstance(response_model, str) else None
         logger.info(f'OpenRouter used {served_model or "unknown model"}')
-        message = response_data['choices'][0]['message']
+        choice = response_data['choices'][0]
+        message = choice['message']
         assert isinstance(message, dict), 'OpenRouter returned an invalid message'
 
         # Providers normally expose their plaintext reasoning in this normalized field.
@@ -398,14 +427,27 @@ Choose exactly one area:
         if classification_reasoning:
             logger.info(f'{served_model or "unknown model"} thinking: {classification_reasoning}')
 
+        if choice.get('finish_reason') == 'length':
+            logger.error(
+                f'{served_model or "unknown model"} reached max_tokens; discarding incomplete output'
+            )
+            return 'altro', None, classification_reasoning, served_model
+
         output_text = message.get('content')
         assert isinstance(output_text, str), 'OpenRouter returned invalid message content'
         result = json.loads(output_text)
         area = result['area']
-        return area if area in CLASSIFIED_AREAS else 'altro', classification_reasoning, served_model
+        place = result.get('place')
+        place = place.strip() if isinstance(place, str) and place.strip() else None
+        return (
+            area if area in CLASSIFIED_AREAS else 'altro',
+            place,
+            classification_reasoning,
+            served_model,
+        )
     except Exception:
         logger.exception('Error classifying article, classifying as altro')
-        return 'altro', classification_reasoning, served_model
+        return 'altro', None, classification_reasoning, served_model
 
 
 def download_image(image_url: str) -> Optional[str]:
@@ -437,6 +479,9 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
 
     if message.description:
         msg += f'\n\n<i>{telegram_escape(message.description)}</i>'
+
+    if message.place:
+        msg += f'\n\n📍 {telegram_escape(message.place)}'
 
     msg += f'\n\n📰 <a href="{message.link}">Leggi articolo</a>'
 
@@ -496,15 +541,15 @@ def send_title_diff_log(article: Article, entry):
         logger.exception('Error sending log')
 
 
-def send_classification_log(title: str, link: str, area: str,
+def send_classification_log(title: str, link: str, area: str, place: Optional[str],
                             reasoning: Optional[str], model: Optional[str]):
     try:
         response = requests.post(f'{TELEGRAM_API_URL}/sendMessage', json={
             'chat_id': TELEGRAM_LOGS_CHANNEL,
-            'text': '<strong>Article classification</strong>\n\n'
-                    f'<strong>{telegram_escape(title)}</strong>\n'
-                    f'<code>{telegram_escape(link)}</code>\n\n'
+            'text': f'<strong>{telegram_escape(title)}</strong>\n\n'
+                    f'{telegram_escape(link)}\n\n'
                     f'Area: <code>{telegram_escape(area)}</code>\n'
+                    f'Place: <code>{telegram_escape(place or "unknown")}</code>\n'
                     f'Model: <code>{telegram_escape(model or "unknown")}</code>\n\n'
                     f'<pre>{telegram_escape(reasoning or "No reasoning returned")[:2500]}</pre>',
             'parse_mode': 'HTML',

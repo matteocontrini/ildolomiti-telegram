@@ -7,7 +7,7 @@ from unittest.mock import patch
 os.environ.setdefault('BOT_TOKEN', 'test')
 logging.getLogger('main').disabled = True
 
-from main import classify_area
+from main import classify_article
 
 
 class ClassifierTest(unittest.TestCase):
@@ -21,14 +21,14 @@ class ClassifierTest(unittest.TestCase):
                     {'type': 'reasoning.summary', 'summary': 'Summary'},
                     {'type': 'reasoning.text', 'text': 'Raw reasoning'},
                 ],
-                'content': '{"area":"tirolo"}',
+                'content': '{"area":"tirolo","place":"Halltal"}',
             }}],
         }
 
         with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'test'}):
-            result = classify_area('TITLE_SENTINEL', 'DESCRIPTION_SENTINEL', 'EXCERPT_SENTINEL')
+            result = classify_article('TITLE_SENTINEL', 'DESCRIPTION_SENTINEL', 'EXCERPT_SENTINEL')
 
-        self.assertEqual(result, ('tirolo', 'Raw reasoning', 'served-model'))
+        self.assertEqual(result, ('tirolo', 'Halltal', 'Raw reasoning', 'served-model'))
         prompt = post.call_args.kwargs['json']['messages'][0]['content']
         for sentinel in ('TITLE_SENTINEL', 'DESCRIPTION_SENTINEL', 'EXCERPT_SENTINEL'):
             self.assertIn(sentinel, prompt)
@@ -39,7 +39,26 @@ class ClassifierTest(unittest.TestCase):
         post.return_value.json.return_value = {'choices': [{'message': {'content': None}}]}
 
         with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'test'}):
-            self.assertEqual(classify_area('title', 'description', 'excerpt'), ('altro', None, None))
+            self.assertEqual(
+                classify_article('title', 'description', 'excerpt'),
+                ('altro', None, None, None),
+            )
+
+    @patch('main.requests.post')
+    def test_truncated_response_falls_back_to_altro(self, post):
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            'model': 'served-model',
+            'choices': [{
+                'finish_reason': 'length',
+                'message': {'reasoning': 'Too much thinking', 'content': None},
+            }],
+        }
+
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'test'}):
+            result = classify_article('title', 'description', 'excerpt')
+
+        self.assertEqual(result, ('altro', None, 'Too much thinking', 'served-model'))
 
     @patch('main.time.sleep')
     @patch('main.requests.post')
@@ -48,14 +67,16 @@ class ClassifierTest(unittest.TestCase):
             SimpleNamespace(status_code=429, text='rate limited'),
             SimpleNamespace(
                 status_code=200,
-                json=lambda: {'choices': [{'message': {'content': '{"area":"italia"}'}}]},
+                json=lambda: {'choices': [{'message': {
+                    'content': '{"area":"italia","place":null}'
+                }}]},
             ),
         ]
 
         with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'test'}):
-            result = classify_area('title', 'description', 'excerpt')
+            result = classify_article('title', 'description', 'excerpt')
 
-        self.assertEqual(result, ('italia', None, None))
+        self.assertEqual(result, ('italia', None, None, None))
         self.assertEqual(post.call_count, 2)
         sleep.assert_called_once_with(1)
 

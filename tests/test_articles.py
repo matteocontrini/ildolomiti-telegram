@@ -76,7 +76,10 @@ class ArticleTest(unittest.TestCase):
         ]
         with (
             patch('main.fetch_article_details', side_effect=details),
-            patch('main.classify_area') as classify,
+            patch('main.classify_article', return_value=(
+                'veneto', 'Trento', 'Reasoning', 'served-model'
+            )) as classify,
+            patch('main.send_classification_log'),
             patch('main.send_message', return_value=42) as send,
         ):
             process_new_article(entry(1))
@@ -88,8 +91,9 @@ class ArticleTest(unittest.TestCase):
         self.assertEqual(immediate.telegram_message_id, 42)
         self.assertTrue(digest.is_digest)
         self.assertIsNone(digest.telegram_message_id)
-        classify.assert_not_called()
+        classify.assert_called_once()
         send.assert_called_once()
+        self.assertEqual(send.call_args.args[0].place, 'Trento')
 
     def test_queues_classification_with_audit_data(self):
         with (
@@ -100,8 +104,8 @@ class ArticleTest(unittest.TestCase):
                 'image_url': None,
                 'area': None,
             }),
-            patch('main.classify_area', return_value=(
-                'veneto', 'Located near Belluno.', 'served-model'
+            patch('main.classify_article', return_value=(
+                'veneto', 'Belluno', 'Located near Belluno.', 'served-model'
             )),
             patch('main.send_classification_log') as classification_log,
             patch('main.send_message') as send,
