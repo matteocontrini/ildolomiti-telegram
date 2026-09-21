@@ -322,11 +322,10 @@ Choose exactly one area:
 - italia: elsewhere in Italy or a national Italian story
 - altro: outside Italy or the location cannot be determined
 
-<article title="{title}">
-{description}
-
-{excerpt}
-</article>'''
+<title>{title}</title>
+<description>{description}</description>
+<excerpt>{excerpt}</article>
+'''
 
     try:
         payload = {
