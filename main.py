@@ -271,9 +271,12 @@ def fetch_article_details(link: str) -> dict:
             description = description.text.strip()
         else:
             logger.error('Description not found')
-        # Extract first two paragraphs capped to 2000 chars
-        paragraphs = article.select('.field-name-body p')[:2]
-        excerpt = ' '.join(p.get_text(' ', strip=True) for p in paragraphs)[:2000]
+        # Extract first two non-empty paragraphs capped to 2000 chars
+        paragraphs = [
+            text for paragraph in article.select('.field-name-body p')
+            if (text := paragraph.get_text(' ', strip=True))
+        ][:2]
+        excerpt = ' '.join(paragraphs)[:2000]
         image_url = soup.find('meta', property='og:image')
         if image_url:
             image_url = image_url['content']
