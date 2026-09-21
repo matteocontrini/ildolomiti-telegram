@@ -109,7 +109,7 @@ def check():
 
     resp = requests.get(url, headers={
         'User-Agent': 'Il Dolomiti Telegram (+https://github.com/matteocontrini/ildolomiti-telegram)'
-    })
+    }, timeout=10)
 
     if resp.status_code != 200:
         logger.error(f'Error fetching feed ({resp.status_code}): {resp.text}')
@@ -445,7 +445,7 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
             'caption': msg,
             'parse_mode': 'HTML',
         }
-        resp = requests.post(f'{TELEGRAM_API_URL}/editMessageCaption', json=payload)
+        resp = requests.post(f'{TELEGRAM_API_URL}/editMessageCaption', json=payload, timeout=10)
     else:
         payload = {
             'chat_id': TELEGRAM_CHANNEL,
@@ -456,7 +456,7 @@ def send_message(message: TelegramMessage, telegram_message_id=None) -> int:
                              data=payload,
                              files={
                                  'photo': open(message.image, 'rb')
-                             })
+                             }, timeout=10)
 
     # Error while editing
     if resp.status_code != 200 and telegram_message_id:
@@ -489,7 +489,7 @@ def send_title_diff_log(article: Article, entry):
                     f'Message ID: <code>{article.telegram_message_id}</code>\n'
                     f'Published: {timeago}',
             'parse_mode': 'HTML',
-        })
+        }, timeout=10)
     except (Exception,):
         logger.exception('Error sending log')
 
