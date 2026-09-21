@@ -12,6 +12,7 @@ from typing import Optional
 import feedparser
 import humanize
 import requests
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from bs4 import BeautifulSoup
@@ -646,7 +647,13 @@ if __name__ == '__main__':
     clean()
     check()
 
-    scheduler = BlockingScheduler()
+    scheduler = BlockingScheduler(
+        # Run jobs sequentially preventing concurrency issues
+        executors={'default': ThreadPoolExecutor(max_workers=1)},
+        # Prevent late jobs from being skipped
+        job_defaults={'misfire_grace_time': None},
+    )
+
     scheduler.add_job(check, trigger=CronTrigger(minute='*/9'))
     scheduler.add_job(send_daily_digest, trigger=CronTrigger(hour='18', minute='30', timezone='Europe/Rome'))
     scheduler.add_job(clean, trigger=CronTrigger(minute='5', hour='1'))
