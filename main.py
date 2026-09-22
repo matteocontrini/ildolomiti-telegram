@@ -339,7 +339,7 @@ Choose exactly one area:
 - veneto: Veneto, except articles primarily about Lake Garda
 - lombardia: Lombardia, except articles primarily about Lake Garda
 - friuli_venezia_giulia: Friuli-Venezia Giulia
-- lago_di_garda: Lake Garda or a place directly on its shores outside the Province of Trento is the primary setting
+- lago_di_garda: primarily about Lake Garda or a place directly on its shores, only if outside the Province of Trento
 - tirolo: Austrian state of Tyrol, excluding Alto Adige/Südtirol
 - italia: elsewhere in Italy or a national Italian story
 - altro: outside Italy or the location cannot be determined
