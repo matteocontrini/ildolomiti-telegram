@@ -202,7 +202,7 @@ def process_new_article(entry):
         else:
             logger.info(f'No place extracted for {entry.link}')
         send_classification_log(
-            entry.title, entry.link, area, place,
+            entry.title, entry.link, details['marker'], area, place,
             classification_reasoning, classification_model
         )
 
@@ -316,6 +316,7 @@ def fetch_article_details(link: str) -> dict:
         'description': description,
         'excerpt': excerpt,
         'image_url': image_url,
+        'marker': marker,
         'area': area,
     }
 
@@ -543,13 +544,14 @@ def send_title_diff_log(article: Article, entry):
         logger.exception('Error sending log')
 
 
-def send_classification_log(title: str, link: str, area: str, place: Optional[str],
-                            reasoning: Optional[str], model: Optional[str]):
+def send_classification_log(title: str, link: str, marker: Optional[str], area: str,
+                            place: Optional[str], reasoning: Optional[str], model: Optional[str]):
     try:
         response = requests.post(f'{TELEGRAM_API_URL}/sendMessage', json={
             'chat_id': TELEGRAM_LOGS_CHANNEL,
             'text': f'<strong>{telegram_escape(title)}</strong>\n\n'
                     f'{telegram_escape(link)}\n\n'
+                    f'Marker: <code>{telegram_escape(marker or "unknown")}</code>\n'
                     f'Area: <code>{telegram_escape(area)}</code>\n'
                     f'Place: <code>{telegram_escape(place or "unknown")}</code>\n'
                     f'Model: <code>{telegram_escape(model or "unknown")}</code>\n\n'

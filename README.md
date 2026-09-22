@@ -10,7 +10,7 @@ Compared to a basic RSS feed to Telegram publisher, and the official Telegram ch
 - Cache busting on article URLs, to avoid incurring into 404. In previous implementations, if you requested an article too soon it would 404 and stay 404 in the edge cache for that particular request.
 - Improved tag parsing.
 
-Not all articles are published immediately. Some are saved for later and published in a daily digest message:
+Not all articles are published immediately. Some are saved for later and published in a single daily digest message:
 - Articles marked as Trento or Bolzano are published immediately.
 - Articles marked by the website with an area outside the region are routed to the Veneto, Lombardia and Friuli-Venezia Giulia digest sections.
 - When an article has no area marker, an LLM classifies it as Trento, Bolzano, Veneto, Lombardia, Friuli-Venezia Giulia, Lago di Garda,

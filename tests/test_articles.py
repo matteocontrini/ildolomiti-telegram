@@ -55,6 +55,7 @@ class ArticleTest(unittest.TestCase):
         details = fetch_article_details('https://example.com/article')
 
         self.assertEqual(details['excerpt'], 'First paragraph. Second paragraph.')
+        self.assertEqual(details['marker'], 'belluno')
         self.assertEqual(details['area'], 'veneto')
 
     def test_routes_declared_areas(self):
@@ -64,6 +65,7 @@ class ArticleTest(unittest.TestCase):
                 'description': 'Description',
                 'excerpt': '',
                 'image_url': None,
+                'marker': 'trento',
                 'area': 'trento',
             },
             {
@@ -71,6 +73,7 @@ class ArticleTest(unittest.TestCase):
                 'description': 'Description',
                 'excerpt': '',
                 'image_url': None,
+                'marker': 'belluno',
                 'area': 'veneto',
             },
         ]
@@ -102,6 +105,7 @@ class ArticleTest(unittest.TestCase):
                 'description': 'Description',
                 'excerpt': 'Excerpt',
                 'image_url': None,
+                'marker': None,
                 'area': None,
             }),
             patch('main.classify_article', return_value=(
@@ -117,7 +121,10 @@ class ArticleTest(unittest.TestCase):
         self.assertEqual(article.area, 'veneto')
         self.assertEqual(article.classification_reasoning, 'Located near Belluno.')
         self.assertEqual(article.classification_model, 'served-model')
-        classification_log.assert_called_once()
+        classification_log.assert_called_once_with(
+            'Article 123', entry(123).link, None, 'veneto', 'Belluno',
+            'Located near Belluno.', 'served-model'
+        )
         send.assert_not_called()
 
     def test_updates_digest_article_by_post_id(self):
@@ -138,6 +145,7 @@ class ArticleTest(unittest.TestCase):
             'description': 'Description',
             'excerpt': '',
             'image_url': None,
+            'marker': 'belluno',
             'area': 'veneto',
         }):
             process_new_article(changed)
