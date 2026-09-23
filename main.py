@@ -29,7 +29,7 @@ TELEGRAM_LOGS_CHANNEL = -1001626800013
 DATABASE_PATH = os.environ.get('DATABASE_PATH', 'ildolomiti.db')
 OPENROUTER_MODELS = os.environ.get(
     'OPENROUTER_MODELS',
-    'openai/gpt-oss-120b,z-ai/glm-5.3-flash,qwen/qwen3.8-flash,mistralai/mistral-small-2603',
+    'openai/gpt-oss-120b,z-ai/glm-5.3-flash,qwen/qwen3.8-flash',
 ).split(',')
 
 USER_AGENT = (
