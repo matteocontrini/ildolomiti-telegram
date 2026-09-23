@@ -226,7 +226,7 @@ def process_new_article(entry):
         link=entry.link,
         tags=tags,
         description=description,
-        image=download_image(details['image_url']) or 'fallback.jpg',
+        image=download_image(details['image_urls']) or 'fallback.jpg',
         place=place,
     )
 
@@ -281,7 +281,7 @@ def fetch_article_details(link: str) -> dict:
     post_id = None
     description = None
     excerpt = ''
-    image_url = None
+    opening_image = None
 
     article = soup.select_one('article[id^="node-"]')
     if article:
@@ -297,13 +297,20 @@ def fetch_article_details(link: str) -> dict:
             if (text := paragraph.get_text(' ', strip=True))
         ][:2]
         excerpt = ' '.join(paragraphs)[:2000]
-        image_url = soup.find('meta', property='og:image')
-        if image_url:
-            image_url = image_url['content']
-        else:
-            logger.error('Image meta tag not found')
+        opening_image = article.select_one('.artImage img[data-src]')
     else:
         logger.error('Article node not found')
+
+    image_urls = []
+    for url in (
+        opening_image.get('data-src') if opening_image else None,
+        (soup.find('link', rel='image_src') or {}).get('href'),
+        (soup.find('meta', property='og:image') or {}).get('content'),
+    ):
+        if url and url not in image_urls:
+            image_urls.append(url)
+    if not image_urls:
+        logger.error('Image not found')
 
     # Extract the area marker, e.g. "/sondrio" -> "sondrio"
     marker = soup.select_one('.zona-marker[href]')
@@ -315,7 +322,7 @@ def fetch_article_details(link: str) -> dict:
         'post_id': post_id,
         'description': description,
         'excerpt': excerpt,
-        'image_url': image_url,
+        'image_urls': image_urls,
         'marker': marker,
         'area': area,
     }
@@ -453,22 +460,23 @@ Output example:
         return 'altro', None, classification_reasoning, served_model
 
 
-def download_image(image_url: str) -> Optional[str]:
-    if not image_url:
+def download_image(image_urls: list[str]) -> Optional[str]:
+    if not image_urls:
         return None
-    try:
-        session = requests.Session()
-        retries = Retry(total=2, status_forcelist=[502, 503, 504])
-        session.mount('https://', HTTPAdapter(max_retries=retries))
-        resp = session.get(image_url, timeout=10)
-        resp.raise_for_status()
-        filename = 'images/' + md5(image_url.encode('utf-8')).hexdigest()
-        with open(filename, 'wb') as f:
-            f.write(resp.content)
-        return filename
-    except (Exception,):
-        logger.exception('Error downloading image')
-        return None
+    session = requests.Session()
+    retries = Retry(total=2, status_forcelist=[502, 503, 504])
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+    for image_url in image_urls:
+        try:
+            resp = session.get(image_url, timeout=10)
+            resp.raise_for_status()
+            filename = 'images/' + md5(image_url.encode('utf-8')).hexdigest()
+            with open(filename, 'wb') as f:
+                f.write(resp.content)
+            return filename
+        except Exception:
+            logger.exception('Error downloading image from %s', image_url)
+    return None
 
 
 def send_message(message: TelegramMessage, telegram_message_id=None) -> int:

@@ -3,14 +3,16 @@ import os
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, mock_open, patch
+
+from requests import ConnectionError
 
 os.environ.setdefault('BOT_TOKEN', 'test')
 logging.getLogger('main').disabled = True
 
 from peewee import SqliteDatabase
 
-from main import Article, fetch_article_details, process_new_article
+from main import Article, download_image, fetch_article_details, process_new_article
 
 
 def entry(post_id: int):
@@ -40,6 +42,8 @@ class ArticleTest(unittest.TestCase):
                 <a class="zona-marker" href="/belluno">Belluno</a>
                 <article id="node-123">
                     <div class="artSub">Description</div>
+                    <div class="artImage"><img src="/sites/default/files/lazy.jpg"
+                        data-src="https://cdn.ildolomiti.it/opening.jpg"></div>
                     <div class="field-name-body">
                         <p>First paragraph.</p>
                         <p>&nbsp;</p>
@@ -47,7 +51,9 @@ class ArticleTest(unittest.TestCase):
                         <p>Third paragraph.</p>
                     </div>
                 </article>
-                <meta property="og:image" content="image.jpg">
+                <meta property="og:image" content="https://www.ildolomiti.it/og.jpg">
+                <link rel="image_src" href="https://cdn.ildolomiti.it/opening.jpg">
+                <meta name="twitter:image" content="https://cdn.ildolomiti.it/original.jpg">
             ''',
             raise_for_status=lambda: None,
         )
@@ -55,8 +61,29 @@ class ArticleTest(unittest.TestCase):
         details = fetch_article_details('https://example.com/article')
 
         self.assertEqual(details['excerpt'], 'First paragraph. Second paragraph.')
+        self.assertEqual(details['image_urls'], [
+            'https://cdn.ildolomiti.it/opening.jpg',
+            'https://www.ildolomiti.it/og.jpg',
+        ])
         self.assertEqual(details['marker'], 'belluno')
         self.assertEqual(details['area'], 'veneto')
+
+    @patch('main.requests.Session')
+    def test_tries_next_image_after_download_failure(self, session):
+        session.return_value.get.side_effect = [
+            ConnectionError('opening image unavailable'),
+            SimpleNamespace(content=b'image', raise_for_status=lambda: None),
+        ]
+        with patch('builtins.open', mock_open()) as image_file:
+            filename = download_image(['https://cdn.ildolomiti.it/opening.jpg',
+                                       'https://www.ildolomiti.it/og.jpg'])
+
+        self.assertTrue(filename.startswith('images/'))
+        session.return_value.get.assert_has_calls([
+            call('https://cdn.ildolomiti.it/opening.jpg', timeout=10),
+            call('https://www.ildolomiti.it/og.jpg', timeout=10),
+        ])
+        image_file.assert_called_once_with(filename, 'wb')
 
     def test_routes_declared_areas(self):
         details = [
@@ -64,7 +91,7 @@ class ArticleTest(unittest.TestCase):
                 'post_id': 1,
                 'description': 'Description',
                 'excerpt': '',
-                'image_url': None,
+                'image_urls': [],
                 'marker': 'trento',
                 'area': 'trento',
             },
@@ -72,7 +99,7 @@ class ArticleTest(unittest.TestCase):
                 'post_id': 2,
                 'description': 'Description',
                 'excerpt': '',
-                'image_url': None,
+                'image_urls': [],
                 'marker': 'belluno',
                 'area': 'veneto',
             },
@@ -104,7 +131,7 @@ class ArticleTest(unittest.TestCase):
                 'post_id': 123,
                 'description': 'Description',
                 'excerpt': 'Excerpt',
-                'image_url': None,
+                'image_urls': [],
                 'marker': None,
                 'area': None,
             }),
@@ -144,7 +171,7 @@ class ArticleTest(unittest.TestCase):
             'post_id': 123,
             'description': 'Description',
             'excerpt': '',
-            'image_url': None,
+            'image_urls': [],
             'marker': 'belluno',
             'area': 'veneto',
         }):
