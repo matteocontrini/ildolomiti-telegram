@@ -395,10 +395,10 @@ Output example:
                 json=payload,
                 timeout=60,
             )
-            if response.status_code != 429 or attempt == 2:
+            if attempt == 2 or not (response.status_code == 429 or 500 <= response.status_code < 600):
                 break
             wait = 2 ** attempt
-            logger.warning(f'OpenRouter rate limited the request, retrying in {wait}s')
+            logger.warning(f'OpenRouter returned {response.status_code}, retrying in {wait}s')
             time.sleep(wait)
 
         if response.status_code != 200:

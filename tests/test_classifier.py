@@ -80,6 +80,27 @@ class ClassifierTest(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    @patch('main.time.sleep')
+    @patch('main.requests.post')
+    def test_retries_server_errors(self, post, sleep):
+        post.side_effect = [
+            SimpleNamespace(status_code=500, text='server error'),
+            SimpleNamespace(status_code=599, text='server error'),
+            SimpleNamespace(
+                status_code=200,
+                json=lambda: {'choices': [{'message': {
+                    'content': '{"area":"italia","place":null}'
+                }}]},
+            ),
+        ]
+
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'test'}):
+            result = classify_article('title', 'description', 'excerpt')
+
+        self.assertEqual(result, ('italia', None, None, None))
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+
 
 if __name__ == '__main__':
     unittest.main()
