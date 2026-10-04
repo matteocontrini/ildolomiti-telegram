@@ -341,15 +341,15 @@ def classify_article(title: str, description: str, excerpt: str) \
     prompt = f'''Classify this news article published by Il Dolomiti by its primary geographic area and extract the place where the event happened.
 
 Choose exactly one area:
-- trento: Province of Trento
-- bolzano: Province of Bolzano
+- trento: Province of Trento/Trentino
+- bolzano: Province of Bolzano/Alto Adige/Südtirol
 - veneto: Veneto, except articles primarily about Lake Garda
 - lombardia: Lombardia, except articles primarily about Lake Garda
 - friuli_venezia_giulia: Friuli-Venezia Giulia
 - lago_di_garda: primarily about Lake Garda or a place directly on its shores, only if outside the Province of Trento
-- tirolo: Austrian state of Tyrol, excluding Alto Adige/Südtirol
+- tirolo: Austrian state of Tyrol
 - italia: elsewhere in Italy or a national Italian story
-- altro: outside Italy or the location cannot be determined
+- altro: outside Italy (excluding Tirolo) or the location cannot be determined
 
 For place, first determine whether the event is an accident or a mishap.
 - If so, extract the name of the place (city, locality, mountain, etc.) where the event happened.
